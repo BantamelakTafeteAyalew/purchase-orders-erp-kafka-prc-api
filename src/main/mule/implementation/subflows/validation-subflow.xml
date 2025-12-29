@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Validation Subflows                        -->
+    <!-- ========================================== -->
+
+    <!-- Validate Purchase Order Event -->
+    <sub-flow name="validate-purchase-order-subflow" doc:name="Validate Purchase Order">
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Validating purchase order: " ++ (payload.poNumber default "unknown")]' 
+                doc:name="Log Validation Start"/>
+        
+        <choice doc:name="Validate Required Fields">
+            <when expression="#[isEmpty(payload.poNumber)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="poNumber is required" doc:name="Raise poNumber Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.supplierId)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="supplierId is required" doc:name="Raise supplierId Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.warehouseId)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="warehouseId is required" doc:name="Raise warehouseId Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.items) or sizeOf(payload.items default []) == 0]">
+                <raise-error type="APP:VALIDATION_ERROR" description="items array is required and cannot be empty" doc:name="Raise items Error"/>
+            </when>
+        </choice>
+        
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Purchase order validation passed"]' 
+                doc:name="Log Validation Success"/>
+    </sub-flow>
+
+    <!-- Validate Inventory Update Event -->
+    <sub-flow name="validate-inventory-update-subflow" doc:name="Validate Inventory Update">
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Validating inventory update for SKU: " ++ (payload.sku default "unknown")]' 
+                doc:name="Log Validation Start"/>
+        
+        <choice doc:name="Validate Required Fields">
+            <when expression="#[isEmpty(payload.warehouseId)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="warehouseId is required" doc:name="Raise warehouseId Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.sku)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="sku is required" doc:name="Raise sku Error"/>
+            </when>
+            <when expression="#[payload.quantityAvailable == null]">
+                <raise-error type="APP:VALIDATION_ERROR" description="quantityAvailable is required" doc:name="Raise quantityAvailable Error"/>
+            </when>
+        </choice>
+        
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Inventory update validation passed"]' 
+                doc:name="Log Validation Success"/>
+    </sub-flow>
+
+    <!-- Validate Shipment Confirmation Event -->
+    <sub-flow name="validate-shipment-confirmation-subflow" doc:name="Validate Shipment Confirmation">
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Validating shipment: " ++ (payload.shipmentId default "unknown")]' 
+                doc:name="Log Validation Start"/>
+        
+        <choice doc:name="Validate Required Fields">
+            <when expression="#[isEmpty(payload.shipmentId)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="shipmentId is required" doc:name="Raise shipmentId Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.poNumber)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="poNumber is required" doc:name="Raise poNumber Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.carrier)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="carrier is required" doc:name="Raise carrier Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.items) or sizeOf(payload.items default []) == 0]">
+                <raise-error type="APP:VALIDATION_ERROR" description="items array is required and cannot be empty" doc:name="Raise items Error"/>
+            </when>
+        </choice>
+        
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Shipment confirmation validation passed"]' 
+                doc:name="Log Validation Success"/>
+    </sub-flow>
+
+    <!-- Validate Picking Status Event -->
+    <sub-flow name="validate-picking-status-subflow" doc:name="Validate Picking Status">
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Validating picking status: " ++ (payload.pickId default "unknown")]' 
+                doc:name="Log Validation Start"/>
+        
+        <choice doc:name="Validate Required Fields">
+            <when expression="#[isEmpty(payload.pickId)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="pickId is required" doc:name="Raise pickId Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.warehouseId)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="warehouseId is required" doc:name="Raise warehouseId Error"/>
+            </when>
+            <when expression="#[isEmpty(payload.status)]">
+                <raise-error type="APP:VALIDATION_ERROR" description="status is required" doc:name="Raise status Error"/>
+            </when>
+        </choice>
+        
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Picking status validation passed"]' 
+                doc:name="Log Validation Success"/>
+    </sub-flow>
+
+</mule>

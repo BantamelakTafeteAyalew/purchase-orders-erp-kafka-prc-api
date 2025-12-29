@@ -1,0 +1,29 @@
+#%RAML 1.0 DataType
+type: object
+properties:
+  shipmentId:
+    type: string
+    description: Shipment identifier
+  poNumber:
+    type: string
+    description: Purchase order number
+  carrier:
+    type: string
+    description: Carrier name
+  trackingNumber:
+    type: string
+    description: Tracking number
+  shippedDate:
+    type: datetime
+    description: Shipment date and time
+  items:
+    type: array
+    items:
+      type: object
+      properties:
+        sku:
+          type: string
+          description: Stock keeping unit
+        quantityShipped:
+          type: number
+          description: Quantity shipped

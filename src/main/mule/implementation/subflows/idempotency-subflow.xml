@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Idempotency Subflows                       -->
+    <!-- ========================================== -->
+
+    <!-- Check and Store Idempotency Key -->
+    <sub-flow name="idempotency-check-subflow" doc:name="Idempotency Check">
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Checking idempotency for key: " ++ vars.idempotencyKey]' 
+                doc:name="Log Idempotency Check"/>
+        
+        <!-- Check if key exists in Object Store -->
+        <os:contains key="#[vars.idempotencyKey]" 
+                     objectStore="Idempotency_Object_Store" 
+                     target="isDuplicate" 
+                     doc:name="Check Duplicate"/>
+        
+        <choice doc:name="Is Duplicate?">
+            <when expression="#[vars.isDuplicate]">
+                <logger level="WARN" 
+                        message='#["[" ++ correlationId ++ "] Duplicate message detected for key: " ++ vars.idempotencyKey]' 
+                        doc:name="Log Duplicate"/>
+                <raise-error type="MULE:DUPLICATE_MESSAGE" 
+                             description="#['Duplicate message detected for key: ' ++ vars.idempotencyKey]" 
+                             doc:name="Raise Duplicate Error"/>
+            </when>
+            <otherwise>
+                <logger level="DEBUG" 
+                        message='#["[" ++ correlationId ++ "] No duplicate found, proceeding with processing"]' 
+                        doc:name="Log No Duplicate"/>
+            </otherwise>
+        </choice>
+    </sub-flow>
+
+    <!-- Store Idempotency Key after successful processing -->
+    <sub-flow name="idempotency-store-subflow" doc:name="Store Idempotency Key">
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Storing idempotency key: " ++ vars.idempotencyKey]' 
+                doc:name="Log Store Start"/>
+        
+        <ee:transform doc:name="Prepare Idempotency Record">
+            <ee:variables>
+                <ee:set-variable variableName="idempotencyRecord"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    key: vars.idempotencyKey,
+    eventId: vars.eventId,
+    correlationId: correlationId,
+    processedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    eventType: vars.eventType
+}]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        
+        <os:store key="#[vars.idempotencyKey]" 
+                  objectStore="Idempotency_Object_Store" 
+                  doc:name="Store Idempotency Key">
+            <os:value><![CDATA[#[vars.idempotencyRecord]]]></os:value>
+        </os:store>
+        
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Successfully stored idempotency key"]' 
+                doc:name="Log Store Success"/>
+    </sub-flow>
+
+    <!-- Remove Idempotency Key (for rollback scenarios) -->
+    <sub-flow name="idempotency-remove-subflow" doc:name="Remove Idempotency Key">
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Removing idempotency key: " ++ vars.idempotencyKey]' 
+                doc:name="Log Remove Start"/>
+        
+        <try doc:name="Try Remove">
+            <os:remove key="#[vars.idempotencyKey]" 
+                       objectStore="Idempotency_Object_Store" 
+                       doc:name="Remove Idempotency Key"/>
+            <error-handler>
+                <on-error-continue type="OS:KEY_NOT_FOUND" doc:name="Key Not Found">
+                    <logger level="DEBUG" 
+                            message='#["[" ++ correlationId ++ "] Idempotency key not found (already removed)"]' 
+                            doc:name="Log Key Not Found"/>
+                </on-error-continue>
+            </error-handler>
+        </try>
+        
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Idempotency key removal completed"]' 
+                doc:name="Log Remove Complete"/>
+    </sub-flow>
+
+    <!-- Retrieve Idempotency Record -->
+    <sub-flow name="idempotency-retrieve-subflow" doc:name="Retrieve Idempotency Record">
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Retrieving idempotency record for key: " ++ vars.idempotencyKey]' 
+                doc:name="Log Retrieve Start"/>
+        
+        <os:retrieve key="#[vars.idempotencyKey]" 
+                     objectStore="Idempotency_Object_Store" 
+                     target="idempotencyRecord" 
+                     doc:name="Retrieve Idempotency Record">
+            <os:default-value><![CDATA[#[null]]]></os:default-value>
+        </os:retrieve>
+        
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Retrieved idempotency record: " ++ (vars.idempotencyRecord as String default "null")]' 
+                doc:name="Log Retrieve Result"/>
+    </sub-flow>
+
+</mule>

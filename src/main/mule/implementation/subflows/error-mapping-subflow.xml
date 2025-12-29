@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Error Mapping Subflows                     -->
+    <!-- ========================================== -->
+
+    <!-- Map Validation Error to API Response -->
+    <sub-flow name="error-mapping-validation-subflow" doc:name="Map Validation Error">
+        <ee:transform doc:name="Transform Validation Error">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Validation Error: " ++ (error.description default "Invalid request"),
+    errorCode: "ERR_VALIDATION",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[400]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </sub-flow>
+
+    <!-- Map Kafka Error to API Response -->
+    <sub-flow name="error-mapping-kafka-subflow" doc:name="Map Kafka Error">
+        <ee:transform doc:name="Transform Kafka Error">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Event publishing failed: " ++ (error.description default "Kafka error"),
+    errorCode: "ERR_KAFKA",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    retryable: true
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[502]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </sub-flow>
+
+    <!-- Map Success Response -->
+    <sub-flow name="success-response-subflow" doc:name="Map Success Response">
+        <ee:transform doc:name="Transform Success Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: true,
+    message: vars.successMessage default "Event published successfully",
+    referenceId: vars.eventId
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[201]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </sub-flow>
+
+    <!-- Log Request Metadata -->
+    <sub-flow name="log-request-metadata-subflow" doc:name="Log Request Metadata">
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Request received - Method: " ++ attributes.method ++ ", Path: " ++ attributes.requestPath ++ ", Client IP: " ++ (attributes.remoteAddress default "unknown")]' 
+                doc:name="Log Request Metadata"/>
+    </sub-flow>
+
+    <!-- Log Response Metadata -->
+    <sub-flow name="log-response-metadata-subflow" doc:name="Log Response Metadata">
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Response sent - Status: " ++ (vars.httpStatus as String default "200") ++ ", Success: " ++ (payload.success as String default "unknown")]' 
+                doc:name="Log Response Metadata"/>
+    </sub-flow>
+
+</mule>

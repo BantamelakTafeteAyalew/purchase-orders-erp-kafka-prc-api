@@ -1,0 +1,14 @@
+{
+  "minMuleVersion": "4.9.3",
+  "javaSpecificationVersions": ["17"],
+  "secureProperties": [
+    "encryption.key",
+    "secure.key",
+    "kafka.password",
+    "tls.keystore.password",
+    "tls.keystore.keyPassword",
+    "tls.truststore.password",
+    "api.clientId",
+    "api.clientSecret"
+  ]
+}

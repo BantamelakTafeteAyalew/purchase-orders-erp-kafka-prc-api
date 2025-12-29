@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Transformation Subflows                    -->
+    <!-- ========================================== -->
+
+    <!-- Transform Purchase Order for Kafka -->
+    <sub-flow name="transform-purchase-order-subflow" doc:name="Transform Purchase Order">
+        <ee:transform doc:name="Transform to Kafka Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    eventType: "PURCHASE_ORDER",
+    eventVersion: "1.0",
+    eventId: vars.eventId,
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    source: "ERP",
+    data: {
+        poNumber: payload.poNumber,
+        supplierId: payload.supplierId,
+        warehouseId: payload.warehouseId,
+        orderDate: payload.orderDate,
+        status: payload.status default "NEW",
+        items: payload.items map (item) -> {
+            sku: item.sku,
+            quantity: item.quantity,
+            uom: item.uom default "EA"
+        }
+    }
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="kafkaKey"><![CDATA[payload.poNumber]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Transformed purchase order for Kafka"]' 
+                doc:name="Log Transformation"/>
+    </sub-flow>
+
+    <!-- Transform Inventory Update for Kafka -->
+    <sub-flow name="transform-inventory-update-subflow" doc:name="Transform Inventory Update">
+        <ee:transform doc:name="Transform to Kafka Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    eventType: "INVENTORY_UPDATE",
+    eventVersion: "1.0",
+    eventId: vars.eventId,
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    source: "WMS",
+    data: {
+        warehouseId: payload.warehouseId,
+        sku: payload.sku,
+        quantityAvailable: payload.quantityAvailable,
+        quantityReserved: payload.quantityReserved default 0,
+        lastUpdated: payload.lastUpdated default now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+    }
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="kafkaKey"><![CDATA[payload.warehouseId ++ "-" ++ payload.sku]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Transformed inventory update for Kafka"]' 
+                doc:name="Log Transformation"/>
+    </sub-flow>
+
+    <!-- Transform Shipment Confirmation for Kafka -->
+    <sub-flow name="transform-shipment-confirmation-subflow" doc:name="Transform Shipment Confirmation">
+        <ee:transform doc:name="Transform to Kafka Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    eventType: "SHIPMENT_CONFIRMATION",
+    eventVersion: "1.0",
+    eventId: vars.eventId,
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    source: "WMS",
+    data: {
+        shipmentId: payload.shipmentId,
+        poNumber: payload.poNumber,
+        carrier: payload.carrier,
+        trackingNumber: payload.trackingNumber,
+        shippedDate: payload.shippedDate,
+        items: payload.items map (item) -> {
+            sku: item.sku,
+            quantityShipped: item.quantityShipped
+        }
+    }
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="kafkaKey"><![CDATA[payload.shipmentId]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Transformed shipment confirmation for Kafka"]' 
+                doc:name="Log Transformation"/>
+    </sub-flow>
+
+    <!-- Transform Picking Status for Kafka -->
+    <sub-flow name="transform-picking-status-subflow" doc:name="Transform Picking Status">
+        <ee:transform doc:name="Transform to Kafka Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    eventType: "PICKING_STATUS",
+    eventVersion: "1.0",
+    eventId: vars.eventId,
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    source: "WMS",
+    data: {
+        pickId: payload.pickId,
+        warehouseId: payload.warehouseId,
+        poNumber: payload.poNumber,
+        status: payload.status,
+        updatedAt: payload.updatedAt default now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+    }
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="kafkaKey"><![CDATA[payload.pickId]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Transformed picking status for Kafka"]' 
+                doc:name="Log Transformation"/>
+    </sub-flow>
+
+</mule>

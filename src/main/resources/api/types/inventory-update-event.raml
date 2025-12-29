@@ -1,0 +1,18 @@
+#%RAML 1.0 DataType
+type: object
+properties:
+  warehouseId:
+    type: string
+    description: Warehouse identifier
+  sku:
+    type: string
+    description: Stock keeping unit
+  quantityAvailable:
+    type: number
+    description: Available quantity
+  quantityReserved:
+    type: number
+    description: Reserved quantity
+  lastUpdated:
+    type: datetime
+    description: Last update timestamp

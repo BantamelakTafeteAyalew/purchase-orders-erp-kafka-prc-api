@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Configuration status="WARN">
+
+    <!-- ========================================== -->
+    <!-- Production-Ready Logging Configuration     -->
+    <!-- Structured JSON logging with correlation   -->
+    <!-- ========================================== -->
+
+    <Properties>
+        <Property name="APP_NAME">kafka-event-api</Property>
+        <Property name="LOG_DIR">${sys:mule.home}${sys:file.separator}logs</Property>
+        <Property name="LOG_PATTERN">%-5p %d{ISO8601} [%t] [correlationId: %X{correlationId}] [processor: %X{processorPath}] %c: %m%n</Property>
+        <Property name="JSON_PATTERN">{"timestamp":"%d{ISO8601}","level":"%-5p","thread":"%t","correlationId":"%X{correlationId}","processor":"%X{processorPath}","logger":"%c","message":"%enc{%m}{JSON}"}%n</Property>
+    </Properties>
+
+    <Appenders>
+        <!-- Console Appender - Human readable format -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${LOG_PATTERN}"/>
+        </Console>
+
+        <!-- Application Log File - Standard format -->
+        <RollingFile name="AppFile" 
+                     fileName="${LOG_DIR}${sys:file.separator}${APP_NAME}.log"
+                     filePattern="${LOG_DIR}${sys:file.separator}${APP_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${LOG_PATTERN}"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="50 MB"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="30"/>
+        </RollingFile>
+
+        <!-- JSON Log File - For log aggregation (ELK, Splunk, etc.) -->
+        <RollingFile name="JsonFile" 
+                     fileName="${LOG_DIR}${sys:file.separator}${APP_NAME}-json.log"
+                     filePattern="${LOG_DIR}${sys:file.separator}${APP_NAME}-json-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${JSON_PATTERN}"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="50 MB"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="30"/>
+        </RollingFile>
+
+        <!-- Error Log File - Errors only -->
+        <RollingFile name="ErrorFile" 
+                     fileName="${LOG_DIR}${sys:file.separator}${APP_NAME}-error.log"
+                     filePattern="${LOG_DIR}${sys:file.separator}${APP_NAME}-error-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${LOG_PATTERN}"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="50 MB"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="30"/>
+            <ThresholdFilter level="ERROR" onMatch="ACCEPT" onMismatch="DENY"/>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <!-- HTTP Service Loggers -->
+        <AsyncLogger name="org.mule.service.http" level="WARN"/>
+        <AsyncLogger name="org.mule.extension.http" level="WARN"/>
+        
+        <!-- Kafka Connector Logger -->
+        <AsyncLogger name="org.mule.extension.kafka" level="INFO"/>
+        <AsyncLogger name="org.apache.kafka" level="WARN"/>
+        
+        <!-- Object Store Logger -->
+        <AsyncLogger name="org.mule.extension.objectstore" level="INFO"/>
+        
+        <!-- APIKit Logger -->
+        <AsyncLogger name="org.mule.module.apikit" level="INFO"/>
+        
+        <!-- Batch Processing Logger -->
+        <AsyncLogger name="org.mule.runtime.core.internal.processor.strategy" level="INFO"/>
+        
+        <!-- Mule Core Logger -->
+        <AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO"/>
+        
+        <!-- Application Logger -->
+        <AsyncLogger name="com.mycompany" level="INFO"/>
+
+        <!-- Root Logger -->
+        <AsyncRoot level="INFO">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AppFile"/>
+            <AppenderRef ref="JsonFile"/>
+            <AppenderRef ref="ErrorFile"/>
+        </AsyncRoot>
+    </Loggers>
+
+</Configuration>

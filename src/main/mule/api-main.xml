@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- API Main Flow                              -->
+    <!-- ========================================== -->
+    <flow name="api-main" doc:name="API Main Flow">
+        <http:listener config-ref="HTTP_Listener_Config" 
+                       path="/api/v1/events/*" 
+                       doc:name="HTTP Listener">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body><![CDATA[#[payload]]]></http:body>
+                <http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+            </http:error-response>
+        </http:listener>
+
+        <!-- Log incoming request -->
+        <flow-ref name="log-request-metadata-subflow" doc:name="Log Request"/>
+
+        <!-- APIKit Router -->
+        <apikit:router config-ref="api-config" doc:name="APIKit Router"/>
+
+        <!-- Log outgoing response -->
+        <flow-ref name="log-response-metadata-subflow" doc:name="Log Response"/>
+
+        <!-- Flow-level error handler for APIKit errors -->
+        <error-handler>
+            <on-error-propagate type="APIKIT:BAD_REQUEST" doc:name="Bad Request">
+                <ee:transform doc:name="Transform Error Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Bad Request: " ++ (error.description default "Invalid request"),
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[400]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_FOUND" doc:name="Not Found">
+                <ee:transform doc:name="Transform Error Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Resource not found",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED" doc:name="Method Not Allowed">
+                <ee:transform doc:name="Transform Error Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Method not allowed",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[405]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE" doc:name="Unsupported Media Type">
+                <ee:transform doc:name="Transform Error Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Unsupported media type",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[415]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+
+    <!-- ========================================== -->
+    <!-- API Console Flow                           -->
+    <!-- ========================================== -->
+    <flow name="api-console" doc:name="API Console Flow">
+        <http:listener config-ref="HTTP_Listener_Config" 
+                       path="/console/*" 
+                       doc:name="HTTP Listener"/>
+        <apikit:console config-ref="api-config" doc:name="APIKit Console"/>
+        <error-handler>
+            <on-error-propagate type="APIKIT:NOT_FOUND" doc:name="Console Not Found">
+                <ee:transform doc:name="Transform Error Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Console resource not found",
+    correlationId: correlationId
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+
+    <!-- ========================================== -->
+    <!-- APIKit Generated Flows                     -->
+    <!-- ========================================== -->
+
+    <!-- POST /purchase-orders -->
+    <flow name="post:\purchase-orders:application\json:api-config" doc:name="POST /purchase-orders">
+        <flow-ref name="purchase-orders-implementation-flow" doc:name="Purchase Orders Implementation"/>
+    </flow>
+
+    <!-- POST /inventory-updates -->
+    <flow name="post:\inventory-updates:application\json:api-config" doc:name="POST /inventory-updates">
+        <flow-ref name="inventory-updates-implementation-flow" doc:name="Inventory Updates Implementation"/>
+    </flow>
+
+    <!-- POST /shipment-confirmations -->
+    <flow name="post:\shipment-confirmations:application\json:api-config" doc:name="POST /shipment-confirmations">
+        <flow-ref name="shipment-confirmations-implementation-flow" doc:name="Shipment Confirmations Implementation"/>
+    </flow>
+
+    <!-- POST /picking-status -->
+    <flow name="post:\picking-status:application\json:api-config" doc:name="POST /picking-status">
+        <flow-ref name="picking-status-implementation-flow" doc:name="Picking Status Implementation"/>
+    </flow>
+
+</mule>

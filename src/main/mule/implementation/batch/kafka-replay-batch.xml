@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+      xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+        http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Object Store for Failed Events             -->
+    <!-- ========================================== -->
+    <os:object-store name="Failed_Events_Object_Store" 
+                     persistent="true" 
+                     maxEntries="50000"
+                     entryTtl="168"
+                     entryTtlUnit="HOURS"
+                     expirationInterval="60"
+                     expirationIntervalUnit="MINUTES"
+                     doc:name="Failed Events Object Store"/>
+
+    <!-- ========================================== -->
+    <!-- Kafka Replay Batch Flow                    -->
+    <!-- Scheduled job to replay failed events      -->
+    <!-- ========================================== -->
+    <flow name="kafka-replay-batch-flow" doc:name="Kafka Replay Batch Flow" initialState="stopped">
+        
+        <!-- Scheduler - runs at configured cron expression -->
+        <scheduler doc:name="Replay Scheduler">
+            <scheduling-strategy>
+                <cron expression="${batch.replay.cronExpression}" timeZone="UTC"/>
+            </scheduling-strategy>
+        </scheduler>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Starting Kafka replay batch job"]' 
+                doc:name="Log Batch Start"/>
+        
+        <!-- Retrieve all failed events from Object Store -->
+        <os:retrieve-all objectStore="Failed_Events_Object_Store" 
+                         target="failedEvents" 
+                         doc:name="Retrieve Failed Events"/>
+        
+        <!-- Check if there are events to process -->
+        <choice doc:name="Has Failed Events?">
+            <when expression="#[sizeOf(vars.failedEvents default {}) > 0]">
+                
+                <!-- Transform to processable list -->
+                <ee:transform doc:name="Prepare Batch Input">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+vars.failedEvents pluck ((value, key) -> {
+    key: key as String,
+    event: value
+})]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                
+                <!-- Batch Job for Replay -->
+                <batch:job jobName="KafkaReplayBatchJob" 
+                           maxFailedRecords="-1" 
+                           blockSize="${batch.blockSize}">
+                    
+                    <batch:process-records>
+                        
+                        <!-- Step 1: Replay Event to Kafka -->
+                        <batch:step name="ReplayToKafkaStep" doc:name="Replay to Kafka">
+                            
+                            <logger level="INFO" 
+                                    message='#["[" ++ correlationId ++ "] Replaying event: " ++ payload.key]' 
+                                    doc:name="Log Replay Start"/>
+                            
+                            <!-- Set variables for Kafka publish -->
+                            <ee:transform doc:name="Prepare Kafka Message">
+                                <ee:variables>
+                                    <ee:set-variable variableName="kafkaTopic"><![CDATA[payload.event.topic]]></ee:set-variable>
+                                    <ee:set-variable variableName="kafkaKey"><![CDATA[payload.event.key]]></ee:set-variable>
+                                    <ee:set-variable variableName="kafkaHeaders"><![CDATA[%dw 2.0
+output application/java
+---
+(payload.event.headers default {}) ++ {
+    "replayedAt": now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    "isReplay": "true"
+}]]></ee:set-variable>
+                                    <ee:set-variable variableName="eventKey"><![CDATA[payload.key]]></ee:set-variable>
+                                </ee:variables>
+                                <ee:message>
+                                    <ee:set-payload><![CDATA[payload.event.payload]]></ee:set-payload>
+                                </ee:message>
+                            </ee:transform>
+                            
+                            <!-- Publish to Kafka -->
+                            <try doc:name="Try Kafka Publish">
+                                <kafka:publish config-ref="Kafka_Producer_Config" 
+                                               topic="#[vars.kafkaTopic]" 
+                                               key="#[vars.kafkaKey]" 
+                                               doc:name="Replay to Kafka">
+                                    <kafka:message><![CDATA[#[output application/json --- payload]]]></kafka:message>
+                                    <kafka:headers><![CDATA[#[vars.kafkaHeaders]]]></kafka:headers>
+                                </kafka:publish>
+                                
+                                <!-- Remove from failed events store on success -->
+                                <os:remove key="#[vars.eventKey]" 
+                                           objectStore="Failed_Events_Object_Store" 
+                                           doc:name="Remove from Failed Store"/>
+                                
+                                <logger level="INFO" 
+                                        message='#["[" ++ correlationId ++ "] Successfully replayed event: " ++ vars.eventKey]' 
+                                        doc:name="Log Replay Success"/>
+                                
+                                <error-handler>
+                                    <on-error-continue type="ANY" doc:name="Continue on Error">
+                                        <logger level="ERROR" 
+                                                message='#["[" ++ correlationId ++ "] Failed to replay event: " ++ vars.eventKey ++ " - Error: " ++ (error.description default "Unknown")]' 
+                                                doc:name="Log Replay Error"/>
+                                    </on-error-continue>
+                                </error-handler>
+                            </try>
+                            
+                        </batch:step>
+                        
+                        <!-- Step 2: Handle Failures -->
+                        <batch:step name="HandleFailuresStep" 
+                                    acceptPolicy="ONLY_FAILURES" 
+                                    doc:name="Handle Failures">
+                            <logger level="ERROR" 
+                                    message='#["[" ++ correlationId ++ "] Batch record failed - will retry in next batch run"]' 
+                                    doc:name="Log Batch Failure"/>
+                        </batch:step>
+                        
+                    </batch:process-records>
+                    
+                    <!-- On Complete -->
+                    <batch:on-complete>
+                        <ee:transform doc:name="Generate Statistics">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    jobName: "KafkaReplayBatchJob",
+    jobId: payload.batchJobInstanceId,
+    totalRecords: payload.totalRecords,
+    successfulRecords: payload.successfulRecords,
+    failedRecords: payload.failedRecords,
+    status: if (payload.failedRecords == 0) "SUCCESS" 
+            else if (payload.successfulRecords > 0) "PARTIAL_SUCCESS" 
+            else "FAILED",
+    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+                        <logger level="INFO" 
+                                message='#["[" ++ correlationId ++ "] Kafka replay batch completed: " ++ write(payload, "application/json")]' 
+                                doc:name="Log Batch Complete"/>
+                    </batch:on-complete>
+                    
+                </batch:job>
+                
+            </when>
+            <otherwise>
+                <logger level="INFO" 
+                        message='#["[" ++ correlationId ++ "] No failed events to replay"]' 
+                        doc:name="Log No Events"/>
+            </otherwise>
+        </choice>
+        
+    </flow>
+
+    <!-- ========================================== -->
+    <!-- Store Failed Event Subflow                 -->
+    <!-- Called when Kafka publish fails            -->
+    <!-- ========================================== -->
+    <sub-flow name="store-failed-event-subflow" doc:name="Store Failed Event">
+        <ee:transform doc:name="Prepare Failed Event Record">
+            <ee:variables>
+                <ee:set-variable variableName="failedEventRecord"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    topic: vars.kafkaTopic,
+    key: vars.kafkaKey,
+    payload: payload,
+    headers: vars.kafkaHeaders default {},
+    failedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    errorDescription: vars.errorDescription default "Unknown error",
+    retryCount: (vars.retryCount default 0) + 1
+}]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        
+        <os:store key="#[vars.idempotencyKey ++ '-' ++ now() as Number]" 
+                  objectStore="Failed_Events_Object_Store" 
+                  doc:name="Store Failed Event">
+            <os:value><![CDATA[#[vars.failedEventRecord]]]></os:value>
+        </os:store>
+        
+        <logger level="WARN" 
+                message='#["[" ++ correlationId ++ "] Stored failed event for later replay"]' 
+                doc:name="Log Failed Event Stored"/>
+    </sub-flow>
+
+</mule>

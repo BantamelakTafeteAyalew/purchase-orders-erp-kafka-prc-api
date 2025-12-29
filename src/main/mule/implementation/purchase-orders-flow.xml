@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Purchase Orders Implementation Flow        -->
+    <!-- ========================================== -->
+    <flow name="purchase-orders-implementation-flow" doc:name="Purchase Orders Implementation">
+        
+        <!-- Generate Event ID -->
+        <ee:transform doc:name="Initialize Variables">
+            <ee:variables>
+                <ee:set-variable variableName="eventId"><![CDATA[uuid()]]></ee:set-variable>
+                <ee:set-variable variableName="eventType"><![CDATA["PURCHASE_ORDER"]]></ee:set-variable>
+                <ee:set-variable variableName="originalPayload"><![CDATA[payload]]></ee:set-variable>
+                <ee:set-variable variableName="idempotencyKey"><![CDATA["PO-" ++ (payload.poNumber default uuid())]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Processing purchase order: " ++ (vars.originalPayload.poNumber default "unknown")]' 
+                doc:name="Log Start"/>
+        
+        <!-- Idempotency Check -->
+        <flow-ref name="idempotency-check-subflow" doc:name="Check Idempotency"/>
+        
+        <!-- Validate Request -->
+        <flow-ref name="validate-purchase-order-subflow" doc:name="Validate Purchase Order"/>
+        
+        <!-- Transform for Kafka -->
+        <flow-ref name="transform-purchase-order-subflow" doc:name="Transform Purchase Order"/>
+        
+        <!-- Publish to Kafka -->
+        <flow-ref name="kafka-publish-purchase-order-subflow" doc:name="Publish to Kafka"/>
+        
+        <!-- Store Idempotency Key -->
+        <flow-ref name="idempotency-store-subflow" doc:name="Store Idempotency Key"/>
+        
+        <!-- Build Success Response -->
+        <ee:transform doc:name="Build Success Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: true,
+    message: "Purchase order event published successfully",
+    referenceId: vars.eventId
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[201]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Purchase order processed successfully - EventId: " ++ vars.eventId]' 
+                doc:name="Log Success"/>
+        
+        <!-- Error Handler -->
+        <error-handler>
+            <on-error-propagate type="APP:VALIDATION_ERROR" doc:name="Validation Error">
+                <flow-ref name="error-mapping-validation-subflow" doc:name="Map Validation Error"/>
+                <logger level="WARN" 
+                        message='#["[" ++ correlationId ++ "] Validation error: " ++ (error.description default "Unknown")]' 
+                        doc:name="Log Validation Error"/>
+            </on-error-propagate>
+            <on-error-propagate type="KAFKA:CONNECTIVITY, KAFKA:TIMEOUT, KAFKA:RETRY_EXHAUSTED" doc:name="Kafka Error">
+                <flow-ref name="error-mapping-kafka-subflow" doc:name="Map Kafka Error"/>
+                <logger level="ERROR" 
+                        message='#["[" ++ correlationId ++ "] Kafka error: " ++ (error.description default "Unknown")]' 
+                        doc:name="Log Kafka Error"/>
+            </on-error-propagate>
+            <on-error-propagate type="MULE:DUPLICATE_MESSAGE" doc:name="Duplicate Message">
+                <ee:transform doc:name="Transform Duplicate Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Duplicate message - already processed",
+    correlationId: correlationId
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[409]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+
+</mule>

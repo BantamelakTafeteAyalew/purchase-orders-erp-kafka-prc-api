@@ -1,0 +1,32 @@
+#%RAML 1.0 DataType
+type: object
+properties:
+  poNumber:
+    type: string
+    description: Purchase order number
+  supplierId:
+    type: string
+    description: Supplier identifier
+  warehouseId:
+    type: string
+    description: Warehouse identifier
+  orderDate:
+    type: datetime
+    description: Order date and time
+  status:
+    type: string
+    description: Order status
+  items:
+    type: array
+    items:
+      type: object
+      properties:
+        sku:
+          type: string
+          description: Stock keeping unit
+        quantity:
+          type: number
+          description: Quantity ordered
+        uom:
+          type: string
+          description: Unit of measure

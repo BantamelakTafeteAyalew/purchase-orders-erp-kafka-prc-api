@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+      xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+        http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Object Store for Inventory Snapshots       -->
+    <!-- ========================================== -->
+    <os:object-store name="Inventory_Snapshot_Object_Store" 
+                     persistent="true" 
+                     maxEntries="100000"
+                     entryTtl="48"
+                     entryTtlUnit="HOURS"
+                     expirationInterval="60"
+                     expirationIntervalUnit="MINUTES"
+                     doc:name="Inventory Snapshot Object Store"/>
+
+    <!-- ========================================== -->
+    <!-- Inventory Reconciliation Batch Flow        -->
+    <!-- Scheduled job to reconcile inventory       -->
+    <!-- ========================================== -->
+    <flow name="inventory-reconciliation-batch-flow" doc:name="Inventory Reconciliation Batch Flow" initialState="stopped">
+        
+        <!-- Scheduler - runs at configured cron expression -->
+        <scheduler doc:name="Reconciliation Scheduler">
+            <scheduling-strategy>
+                <cron expression="${batch.reconciliation.cronExpression}" timeZone="UTC"/>
+            </scheduling-strategy>
+        </scheduler>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Starting inventory reconciliation batch job"]' 
+                doc:name="Log Batch Start"/>
+        
+        <!-- Initialize batch variables -->
+        <ee:transform doc:name="Initialize Batch Variables">
+            <ee:variables>
+                <ee:set-variable variableName="batchId"><![CDATA[uuid()]]></ee:set-variable>
+                <ee:set-variable variableName="batchStartTime"><![CDATA[now()]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        
+        <!-- Retrieve all inventory snapshots from Object Store -->
+        <os:retrieve-all objectStore="Inventory_Snapshot_Object_Store" 
+                         target="inventorySnapshots" 
+                         doc:name="Retrieve Inventory Snapshots"/>
+        
+        <!-- Check if there are snapshots to process -->
+        <choice doc:name="Has Inventory Snapshots?">
+            <when expression="#[sizeOf(vars.inventorySnapshots default {}) > 0]">
+                
+                <!-- Transform to processable list -->
+                <ee:transform doc:name="Prepare Batch Input">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+vars.inventorySnapshots pluck ((value, key) -> {
+    key: key as String,
+    snapshot: value
+})]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+                
+                <!-- Batch Job for Reconciliation -->
+                <batch:job jobName="InventoryReconciliationBatchJob" 
+                           maxFailedRecords="-1" 
+                           blockSize="${batch.blockSize}">
+                    
+                    <batch:process-records>
+                        
+                        <!-- Step 1: Validate and Reconcile -->
+                        <batch:step name="ReconcileStep" doc:name="Reconcile Inventory">
+                            
+                            <logger level="DEBUG" 
+                                    message='#["[" ++ correlationId ++ "] Reconciling inventory: " ++ payload.key]' 
+                                    doc:name="Log Reconcile Start"/>
+                            
+                            <!-- Prepare reconciliation event -->
+                            <ee:transform doc:name="Prepare Reconciliation Event">
+                                <ee:variables>
+                                    <ee:set-variable variableName="reconciliationEvent"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    eventType: "INVENTORY_RECONCILIATION",
+    eventVersion: "1.0",
+    eventId: uuid(),
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    source: "BATCH_RECONCILIATION",
+    data: {
+        warehouseId: payload.snapshot.warehouseId,
+        sku: payload.snapshot.sku,
+        snapshotQuantity: payload.snapshot.quantityAvailable,
+        snapshotTimestamp: payload.snapshot.lastUpdated,
+        reconciliationBatchId: vars.batchId,
+        status: "RECONCILED"
+    }
+}]]></ee:set-variable>
+                                    <ee:set-variable variableName="kafkaKey"><![CDATA[payload.snapshot.warehouseId ++ "-" ++ payload.snapshot.sku]]></ee:set-variable>
+                                    <ee:set-variable variableName="snapshotKey"><![CDATA[payload.key]]></ee:set-variable>
+                                </ee:variables>
+                            </ee:transform>
+                            
+                            <!-- Publish reconciliation event to Kafka -->
+                            <try doc:name="Try Kafka Publish">
+                                <kafka:publish config-ref="Kafka_Producer_Config" 
+                                               topic="${kafka.topics.inventoryUpdates}" 
+                                               key="#[vars.kafkaKey]" 
+                                               doc:name="Publish Reconciliation Event">
+                                    <kafka:message><![CDATA[#[output application/json --- vars.reconciliationEvent]]]></kafka:message>
+                                    <kafka:headers><![CDATA[#[{
+                                        "correlationId": correlationId,
+                                        "eventType": "INVENTORY_RECONCILIATION",
+                                        "batchId": vars.batchId,
+                                        "timestamp": now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+                                    }]]]></kafka:headers>
+                                </kafka:publish>
+                                
+                                <logger level="DEBUG" 
+                                        message='#["[" ++ correlationId ++ "] Successfully published reconciliation event for: " ++ vars.kafkaKey]' 
+                                        doc:name="Log Publish Success"/>
+                                
+                                <error-handler>
+                                    <on-error-continue type="ANY" doc:name="Continue on Error">
+                                        <logger level="ERROR" 
+                                                message='#["[" ++ correlationId ++ "] Failed to publish reconciliation event: " ++ vars.kafkaKey ++ " - Error: " ++ (error.description default "Unknown")]' 
+                                                doc:name="Log Publish Error"/>
+                                    </on-error-continue>
+                                </error-handler>
+                            </try>
+                            
+                            <!-- Aggregator for batch logging -->
+                            <batch:aggregator size="50" doc:name="Batch Aggregator">
+                                <logger level="INFO" 
+                                        message='#["[" ++ correlationId ++ "] Processed batch of 50 reconciliation records"]' 
+                                        doc:name="Log Batch Progress"/>
+                            </batch:aggregator>
+                            
+                        </batch:step>
+                        
+                        <!-- Step 2: Handle Failures -->
+                        <batch:step name="HandleFailuresStep" 
+                                    acceptPolicy="ONLY_FAILURES" 
+                                    doc:name="Handle Failures">
+                            <logger level="ERROR" 
+                                    message='#["[" ++ correlationId ++ "] Reconciliation record failed for: " ++ (payload.key default "unknown")]' 
+                                    doc:name="Log Record Failure"/>
+                            
+                            <batch:aggregator size="10" doc:name="Error Aggregator">
+                                <logger level="WARN" 
+                                        message='#["[" ++ correlationId ++ "] Aggregated 10 failed reconciliation records"]' 
+                                        doc:name="Log Failed Batch"/>
+                            </batch:aggregator>
+                        </batch:step>
+                        
+                    </batch:process-records>
+                    
+                    <!-- On Complete -->
+                    <batch:on-complete>
+                        <ee:transform doc:name="Generate Statistics">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    jobName: "InventoryReconciliationBatchJob",
+    jobId: payload.batchJobInstanceId,
+    batchId: vars.batchId,
+    totalRecords: payload.totalRecords,
+    successfulRecords: payload.successfulRecords,
+    failedRecords: payload.failedRecords,
+    status: if (payload.failedRecords == 0) "SUCCESS" 
+            else if (payload.successfulRecords > 0) "PARTIAL_SUCCESS" 
+            else "FAILED",
+    startTime: vars.batchStartTime as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    durationMs: (now() - vars.batchStartTime) as Number
+}]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+                        <logger level="INFO" 
+                                message='#["[" ++ correlationId ++ "] Inventory reconciliation batch completed: " ++ write(payload, "application/json")]' 
+                                doc:name="Log Batch Complete"/>
+                    </batch:on-complete>
+                    
+                </batch:job>
+                
+            </when>
+            <otherwise>
+                <logger level="INFO" 
+                        message='#["[" ++ correlationId ++ "] No inventory snapshots to reconcile"]' 
+                        doc:name="Log No Snapshots"/>
+            </otherwise>
+        </choice>
+        
+    </flow>
+
+    <!-- ========================================== -->
+    <!-- Store Inventory Snapshot Subflow           -->
+    <!-- Called to store inventory for reconciliation -->
+    <!-- ========================================== -->
+    <sub-flow name="store-inventory-snapshot-subflow" doc:name="Store Inventory Snapshot">
+        <ee:transform doc:name="Prepare Snapshot Record">
+            <ee:variables>
+                <ee:set-variable variableName="snapshotKey"><![CDATA[payload.warehouseId ++ "-" ++ payload.sku]]></ee:set-variable>
+                <ee:set-variable variableName="snapshotRecord"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    warehouseId: payload.warehouseId,
+    sku: payload.sku,
+    quantityAvailable: payload.quantityAvailable,
+    quantityReserved: payload.quantityReserved default 0,
+    lastUpdated: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    correlationId: correlationId
+}]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        
+        <os:store key="#[vars.snapshotKey]" 
+                  objectStore="Inventory_Snapshot_Object_Store" 
+                  doc:name="Store Inventory Snapshot">
+            <os:value><![CDATA[#[vars.snapshotRecord]]]></os:value>
+        </os:store>
+        
+        <logger level="DEBUG" 
+                message='#["[" ++ correlationId ++ "] Stored inventory snapshot: " ++ vars.snapshotKey]' 
+                doc:name="Log Snapshot Stored"/>
+    </sub-flow>
+
+</mule>

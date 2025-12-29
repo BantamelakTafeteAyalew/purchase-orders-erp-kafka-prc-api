@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <munit:config name="purchase-orders-test-suite" doc:name="MUnit Configuration"/>
+
+    <!-- ========================================== -->
+    <!-- Test: Successful Purchase Order Publishing -->
+    <!-- ========================================== -->
+    <munit:test name="test-purchase-order-success" 
+                description="Test successful purchase order event publishing" 
+                doc:name="Test Purchase Order Success">
+        
+        <munit:behavior>
+            <!-- Mock Object Store contains (idempotency check) -->
+            <munit-tools:mock-when processor="os:contains" doc:name="Mock OS Contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[false]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            
+            <!-- Mock Kafka publish -->
+            <munit-tools:mock-when processor="kafka:publish" doc:name="Mock Kafka Publish">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="Kafka_Producer_Config" attributeName="config-ref"/>
+                </munit-tools:with-attributes>
+            </munit-tools:mock-when>
+            
+            <!-- Mock Object Store store (idempotency store) -->
+            <munit-tools:mock-when processor="os:store" doc:name="Mock OS Store"/>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Test Event">
+                <munit:payload value='#[%dw 2.0 output application/json --- {
+                    "poNumber": "PO-12345",
+                    "supplierId": "SUP-001",
+                    "warehouseId": "WH-EAST-01",
+                    "orderDate": "2024-01-15T10:30:00Z",
+                    "status": "NEW",
+                    "items": [
+                        {"sku": "SKU-001", "quantity": 100, "uom": "EA"},
+                        {"sku": "SKU-002", "quantity": 50, "uom": "CS"}
+                    ]
+                }]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="purchase-orders-implementation-flow" doc:name="Call Implementation Flow"/>
+        </munit:execution>
+        
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.success]" is="#[MunitTools::equalTo(true)]" doc:name="Assert Success True"/>
+            <munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::containsString('successfully')]" doc:name="Assert Success Message"/>
+            <munit-tools:assert-that expression="#[payload.referenceId]" is="#[MunitTools::notNullValue()]" doc:name="Assert Reference ID Present"/>
+            <munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(201)]" doc:name="Assert HTTP Status 201"/>
+            
+            <!-- Verify Kafka was called -->
+            <munit-tools:verify-call processor="kafka:publish" times="1" doc:name="Verify Kafka Called">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute whereValue="Kafka_Producer_Config" attributeName="config-ref"/>
+                </munit-tools:with-attributes>
+            </munit-tools:verify-call>
+        </munit:validation>
+    </munit:test>
+
+    <!-- ========================================== -->
+    <!-- Test: Purchase Order Validation Error      -->
+    <!-- ========================================== -->
+    <munit:test name="test-purchase-order-validation-error-missing-po-number" 
+                description="Test validation error when poNumber is missing" 
+                doc:name="Test Validation Error - Missing PO Number"
+                expectedErrorType="APP:VALIDATION_ERROR">
+        
+        <munit:behavior>
+            <!-- Mock Object Store contains -->
+            <munit-tools:mock-when processor="os:contains" doc:name="Mock OS Contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[false]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Test Event - Missing PO Number">
+                <munit:payload value='#[%dw 2.0 output application/json --- {
+                    "supplierId": "SUP-001",
+                    "warehouseId": "WH-EAST-01",
+                    "orderDate": "2024-01-15T10:30:00Z",
+                    "status": "NEW",
+                    "items": [{"sku": "SKU-001", "quantity": 100, "uom": "EA"}]
+                }]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="purchase-orders-implementation-flow" doc:name="Call Implementation Flow"/>
+        </munit:execution>
+    </munit:test>
+
+    <!-- ========================================== -->
+    <!-- Test: Purchase Order Validation Error - Empty Items -->
+    <!-- ========================================== -->
+    <munit:test name="test-purchase-order-validation-error-empty-items" 
+                description="Test validation error when items array is empty" 
+                doc:name="Test Validation Error - Empty Items"
+                expectedErrorType="APP:VALIDATION_ERROR">
+        
+        <munit:behavior>
+            <munit-tools:mock-when processor="os:contains" doc:name="Mock OS Contains">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[false]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Test Event - Empty Items">
+                <munit:payload value='#[%dw 2.0 output application/json --- {
+                    "poNumber": "PO-12345",
+                    "supplierId": "SUP-001",
+                    "warehouseId": "WH-EAST-01",
+                    "orderDate": "2024-01-15T10:30:00Z",
+                    "status": "NEW",
+                    "items": []
+                }]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="purchase-orders-implementation-flow" doc:name="Call Implementation Flow"/>
+        </munit:execution>
+    </munit:test>
+
+    <!-- ========================================== -->
+    <!-- Test: Duplicate Purchase Order             -->
+    <!-- ========================================== -->
+    <munit:test name="test-purchase-order-duplicate" 
+                description="Test duplicate message detection" 
+                doc:name="Test Duplicate Message"
+                expectedErrorType="MULE:DUPLICATE_MESSAGE">
+        
+        <munit:behavior>
+            <!-- Mock Object Store contains returns true (duplicate) -->
+            <munit-tools:mock-when processor="os:contains" doc:name="Mock OS Contains - Duplicate">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[true]"/>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+        </munit:behavior>
+        
+        <munit:execution>
+            <munit:set-event doc:name="Set Test Event">
+                <munit:payload value='#[%dw 2.0 output application/json --- {
+                    "poNumber": "PO-DUPLICATE",
+                    "supplierId": "SUP-001",
+                    "warehouseId": "WH-EAST-01",
+                    "orderDate": "2024-01-15T10:30:00Z",
+                    "status": "NEW",
+                    "items": [{"sku": "SKU-001", "quantity": 100, "uom": "EA"}]
+                }]' mediaType="application/json"/>
+            </munit:set-event>
+            <flow-ref name="purchase-orders-implementation-flow" doc:name="Call Implementation Flow"/>
+        </munit:execution>
+    </munit:test>
+
+</mule>

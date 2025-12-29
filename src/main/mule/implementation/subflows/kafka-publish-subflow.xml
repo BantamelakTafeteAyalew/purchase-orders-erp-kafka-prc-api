@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Kafka Publish Subflows                     -->
+    <!-- ========================================== -->
+
+    <!-- Publish Purchase Order to Kafka -->
+    <sub-flow name="kafka-publish-purchase-order-subflow" doc:name="Publish Purchase Order to Kafka">
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Publishing purchase order to Kafka topic: " ++ p("kafka.topics.purchaseOrders")]' 
+                doc:name="Log Kafka Publish Start"/>
+        
+        <kafka:publish config-ref="Kafka_Producer_Config" 
+                       topic="${kafka.topics.purchaseOrders}" 
+                       key="#[vars.kafkaKey]" 
+                       doc:name="Publish to Kafka">
+            <kafka:message><![CDATA[#[output application/json --- payload]]]></kafka:message>
+            <kafka:headers><![CDATA[#[{
+                "correlationId": correlationId,
+                "eventType": "PURCHASE_ORDER",
+                "sourceSystem": "ERP",
+                "timestamp": now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+            }]]]></kafka:headers>
+        </kafka:publish>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Successfully published purchase order to Kafka"]' 
+                doc:name="Log Kafka Publish Success"/>
+    </sub-flow>
+
+    <!-- Publish Inventory Update to Kafka -->
+    <sub-flow name="kafka-publish-inventory-update-subflow" doc:name="Publish Inventory Update to Kafka">
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Publishing inventory update to Kafka topic: " ++ p("kafka.topics.inventoryUpdates")]' 
+                doc:name="Log Kafka Publish Start"/>
+        
+        <kafka:publish config-ref="Kafka_Producer_Config" 
+                       topic="${kafka.topics.inventoryUpdates}" 
+                       key="#[vars.kafkaKey]" 
+                       doc:name="Publish to Kafka">
+            <kafka:message><![CDATA[#[output application/json --- payload]]]></kafka:message>
+            <kafka:headers><![CDATA[#[{
+                "correlationId": correlationId,
+                "eventType": "INVENTORY_UPDATE",
+                "sourceSystem": "WMS",
+                "timestamp": now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+            }]]]></kafka:headers>
+        </kafka:publish>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Successfully published inventory update to Kafka"]' 
+                doc:name="Log Kafka Publish Success"/>
+    </sub-flow>
+
+    <!-- Publish Shipment Confirmation to Kafka -->
+    <sub-flow name="kafka-publish-shipment-confirmation-subflow" doc:name="Publish Shipment Confirmation to Kafka">
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Publishing shipment confirmation to Kafka topic: " ++ p("kafka.topics.shipmentConfirmations")]' 
+                doc:name="Log Kafka Publish Start"/>
+        
+        <kafka:publish config-ref="Kafka_Producer_Config" 
+                       topic="${kafka.topics.shipmentConfirmations}" 
+                       key="#[vars.kafkaKey]" 
+                       doc:name="Publish to Kafka">
+            <kafka:message><![CDATA[#[output application/json --- payload]]]></kafka:message>
+            <kafka:headers><![CDATA[#[{
+                "correlationId": correlationId,
+                "eventType": "SHIPMENT_CONFIRMATION",
+                "sourceSystem": "WMS",
+                "timestamp": now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+            }]]]></kafka:headers>
+        </kafka:publish>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Successfully published shipment confirmation to Kafka"]' 
+                doc:name="Log Kafka Publish Success"/>
+    </sub-flow>
+
+    <!-- Publish Picking Status to Kafka -->
+    <sub-flow name="kafka-publish-picking-status-subflow" doc:name="Publish Picking Status to Kafka">
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Publishing picking status to Kafka topic: " ++ p("kafka.topics.pickingStatus")]' 
+                doc:name="Log Kafka Publish Start"/>
+        
+        <kafka:publish config-ref="Kafka_Producer_Config" 
+                       topic="${kafka.topics.pickingStatus}" 
+                       key="#[vars.kafkaKey]" 
+                       doc:name="Publish to Kafka">
+            <kafka:message><![CDATA[#[output application/json --- payload]]]></kafka:message>
+            <kafka:headers><![CDATA[#[{
+                "correlationId": correlationId,
+                "eventType": "PICKING_STATUS",
+                "sourceSystem": "WMS",
+                "timestamp": now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+            }]]]></kafka:headers>
+        </kafka:publish>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Successfully published picking status to Kafka"]' 
+                doc:name="Log Kafka Publish Success"/>
+    </sub-flow>
+
+    <!-- Generic Kafka Publish Subflow -->
+    <sub-flow name="kafka-publish-generic-subflow" doc:name="Generic Kafka Publish">
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Publishing to Kafka topic: " ++ vars.kafkaTopic]' 
+                doc:name="Log Kafka Publish Start"/>
+        
+        <kafka:publish config-ref="Kafka_Producer_Config" 
+                       topic="#[vars.kafkaTopic]" 
+                       key="#[vars.kafkaKey]" 
+                       doc:name="Publish to Kafka">
+            <kafka:message><![CDATA[#[output application/json --- payload]]]></kafka:message>
+            <kafka:headers><![CDATA[#[vars.kafkaHeaders default {
+                "correlationId": correlationId,
+                "timestamp": now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+            }]]]></kafka:headers>
+        </kafka:publish>
+        
+        <logger level="INFO" 
+                message='#["[" ++ correlationId ++ "] Successfully published to Kafka topic: " ++ vars.kafkaTopic]' 
+                doc:name="Log Kafka Publish Success"/>
+    </sub-flow>
+
+</mule>

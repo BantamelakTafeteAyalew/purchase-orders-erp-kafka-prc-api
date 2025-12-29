@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns:tls="http://www.mulesoft.org/schema/mule/tls"
+      xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+      xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd
+        http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+        http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd
+        http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+        http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Global Properties Configuration            -->
+    <!-- ========================================== -->
+    <!-- Environment property - override with -Dmule.env=prod|qa|dev -->
+    <global-property name="mule.env" value="dev" doc:name="Environment Property"/>
+    <!-- Encryption key for secure properties - MUST be provided via VM arg: -Dsecure.key=your-encryption-key -->
+    <global-property name="secure.key" value="mule-encryption-key-16" doc:name="Secure Key Default"/>
+    
+    <!-- Configuration Properties -->
+    <configuration-properties file="config.yaml" doc:name="Configuration Properties"/>
+    
+    <!-- Secure Configuration Properties -->
+    <secure-properties:config name="Secure_Properties_Config" 
+                              file="config-secure.yaml" 
+                              key="${secure.key}"
+                              doc:name="Secure Properties Config">
+        <secure-properties:encrypt algorithm="AES" mode="CBC"/>
+    </secure-properties:config>
+
+    <!-- ========================================== -->
+    <!-- TLS Context Configuration                  -->
+    <!-- ========================================== -->
+    <tls:context name="TLS_Context" doc:name="TLS Context">
+        <tls:key-store type="jks" 
+                       path="${tls.keystore.path}" 
+                       alias="${tls.keystore.alias}" 
+                       keyPassword="${secure::tls.keystore.keyPassword}" 
+                       password="${secure::tls.keystore.password}"/>
+        <tls:trust-store type="jks" 
+                         path="${tls.truststore.path}" 
+                         password="${secure::tls.truststore.password}"/>
+    </tls:context>
+
+    <!-- ========================================== -->
+    <!-- HTTP Listener Configuration                -->
+    <!-- ========================================== -->
+    <!-- HTTP Listener (Non-TLS for development) -->
+    <http:listener-config name="HTTP_Listener_Config" doc:name="HTTP Listener Config">
+        <http:listener-connection host="${http.host}" port="${http.port}"/>
+    </http:listener-config>
+    
+    <!-- HTTPS Listener (TLS for production) -->
+    <http:listener-config name="HTTPS_Listener_Config" doc:name="HTTPS Listener Config">
+        <http:listener-connection host="${http.host}" port="${http.https.port}" protocol="HTTPS" tlsContext="TLS_Context"/>
+    </http:listener-config>
+
+    <!-- ========================================== -->
+    <!-- APIKit Configuration                       -->
+    <!-- ========================================== -->
+    <apikit:config name="api-config" 
+                   api="api/api.raml" 
+                   outboundHeadersMapName="outboundHeaders" 
+                   httpStatusVarName="httpStatus"
+                   doc:name="APIKit Config"/>
+
+    <!-- ========================================== -->
+    <!-- API Gateway Autodiscovery                  -->
+    <!-- ========================================== -->
+    <api-gateway:autodiscovery apiId="${api.id}" 
+                               flowRef="api-main" 
+                               ignoreBasePath="true"
+                               doc:name="API Autodiscovery"/>
+
+    <!-- ========================================== -->
+    <!-- Kafka Producer Configuration               -->
+    <!-- ========================================== -->
+    <kafka:producer-config name="Kafka_Producer_Config" doc:name="Kafka Producer Config">
+        <kafka:producer-plaintext-connection bootstrapServers="${kafka.bootstrapServers}">
+            <reconnection>
+                <reconnect-forever frequency="5000"/>
+            </reconnection>
+        </kafka:producer-plaintext-connection>
+    </kafka:producer-config>
+
+    <!-- ========================================== -->
+    <!-- Kafka Consumer Configuration               -->
+    <!-- ========================================== -->
+    <kafka:consumer-config name="Kafka_Consumer_Config" doc:name="Kafka Consumer Config">
+        <kafka:consumer-plaintext-connection bootstrapServers="${kafka.bootstrapServers}" groupId="${kafka.consumer.groupId}">
+            <reconnection>
+                <reconnect-forever frequency="5000"/>
+            </reconnection>
+        </kafka:consumer-plaintext-connection>
+    </kafka:consumer-config>
+
+    <!-- ========================================== -->
+    <!-- Object Store Configuration (Idempotency)   -->
+    <!-- ========================================== -->
+    <os:object-store name="Idempotency_Object_Store" 
+                     persistent="true" 
+                     maxEntries="${objectstore.maxEntries}"
+                     entryTtl="${objectstore.entryTtl}"
+                     entryTtlUnit="${objectstore.entryTtlUnit}"
+                     expirationInterval="${objectstore.expirationInterval}"
+                     expirationIntervalUnit="${objectstore.expirationIntervalUnit}"
+                     doc:name="Idempotency Object Store"/>
+
+    <!-- ========================================== -->
+    <!-- Global Error Handler Reference             -->
+    <!-- ========================================== -->
+    <configuration defaultErrorHandler-ref="Global_Error_Handler" doc:name="Configuration"/>
+
+</mule>

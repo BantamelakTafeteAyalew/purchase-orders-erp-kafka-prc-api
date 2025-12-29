@@ -1,0 +1,18 @@
+# Secure configuration properties (encrypted values)
+# Use secure-properties-tool to encrypt values
+# Format: ![encrypted_value]
+
+kafka:
+  username: "![encrypted_kafka_username]"
+  password: "![encrypted_kafka_password]"
+
+tls:
+  keystore:
+    password: "![encrypted_keystore_password]"
+    keyPassword: "![encrypted_key_password]"
+  truststore:
+    password: "![encrypted_truststore_password]"
+
+api:
+  clientId: "![encrypted_client_id]"
+  clientSecret: "![encrypted_client_secret]"

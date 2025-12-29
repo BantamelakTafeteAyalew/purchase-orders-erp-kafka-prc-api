@@ -1,0 +1,74 @@
+#%RAML 1.0
+title: MuleSoft Kafka Event Publishing API
+version: v1
+baseUri: /api/v1/events
+mediaType: application/json
+protocols: [ HTTPS ]
+
+securitySchemes:
+  client_id_enforcement:
+    type: x-client-id-enforcement
+    describedBy:
+      headers:
+        client_id:
+          type: string
+          required: true
+        client_secret:
+          type: string
+          required: true
+securedBy: [ client_id_enforcement ]
+
+types:
+  PurchaseOrderEvent: !include types/purchase-order-event.raml
+  InventoryUpdateEvent: !include types/inventory-update-event.raml
+  ShipmentConfirmationEvent: !include types/shipment-confirmation-event.raml
+  PickingStatusEvent: !include types/picking-status-event.raml
+  ApiResponse: !include types/api-response.raml
+
+/purchase-orders:
+  post:
+    description: Publish purchase order event to Kafka
+    body:
+      application/json:
+        type: PurchaseOrderEvent
+    responses:
+      201:
+        body:
+          application/json:
+            type: ApiResponse
+
+/inventory-updates:
+  post:
+    description: Publish inventory update event to Kafka
+    body:
+      application/json:
+        type: InventoryUpdateEvent
+    responses:
+      201:
+        body:
+          application/json:
+            type: ApiResponse
+
+/shipment-confirmations:
+  post:
+    description: Publish shipment confirmation event to Kafka
+    body:
+      application/json:
+        type: ShipmentConfirmationEvent
+    responses:
+      201:
+        body:
+          application/json:
+            type: ApiResponse
+
+/picking-status:
+  post:
+    description: Publish picking status event to Kafka
+    body:
+      application/json:
+        type: PickingStatusEvent
+    responses:
+      201:
+        body:
+          application/json:
+            type: ApiResponse

@@ -1,0 +1,54 @@
+# Non-sensitive configuration properties
+# Environment: ${mule.env}
+
+http:
+  host: "0.0.0.0"
+  port: "8081"
+  https:
+    port: "8082"
+
+api:
+  id: "${api.id}"
+  basePath: "/api/v1/events"
+  version: "v1"
+
+kafka:
+  bootstrapServers: "localhost:9092"
+  topics:
+    purchaseOrders: "erp.purchase-orders.v1"
+    inventoryUpdates: "wms.inventory-updates.v1"
+    shipmentConfirmations: "wms.shipment-confirmations.v1"
+    pickingStatus: "wms.picking-status.v1"
+  consumer:
+    groupId: "mulesoft-event-consumer"
+  producer:
+    acks: "all"
+    retries: "3"
+    batchSize: "16384"
+    lingerMs: "1"
+
+objectstore:
+  maxEntries: "10000"
+  entryTtl: "24"
+  entryTtlUnit: "HOURS"
+  expirationInterval: "30"
+  expirationIntervalUnit: "MINUTES"
+
+batch:
+  blockSize: "100"
+  maxFailedRecords: "-1"
+  replay:
+    cronExpression: "0 0 2 * * ?"
+  reconciliation:
+    cronExpression: "0 0 4 * * ?"
+
+logging:
+  level: "INFO"
+  maskFields: "password,secret,token,apiKey,clientSecret"
+
+tls:
+  keystore:
+    path: "keystore.jks"
+    alias: "mule-server"
+  truststore:
+    path: "truststore.jks"

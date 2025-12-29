@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ========================================== -->
+    <!-- Global Error Handler                       -->
+    <!-- Centralized error handling for all flows   -->
+    <!-- ========================================== -->
+    <error-handler name="Global_Error_Handler" doc:name="Global Error Handler">
+        
+        <!-- Bad Request - 400 -->
+        <on-error-propagate type="APIKIT:BAD_REQUEST, VALIDATION:INVALID_BOOLEAN, VALIDATION:INVALID_NUMBER, VALIDATION:BLANK_STRING" 
+                            doc:name="Bad Request">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Bad Request: " ++ (error.description default "Invalid request payload"),
+    errorCode: "ERR_400",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[400]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="WARN" 
+                    message='#["[" ++ correlationId ++ "] Bad Request: " ++ (error.description default "Unknown")]' 
+                    doc:name="Log Bad Request"/>
+        </on-error-propagate>
+
+        <!-- Unauthorized - 401 -->
+        <on-error-propagate type="HTTP:UNAUTHORIZED, APIKIT:UNAUTHORIZED" 
+                            doc:name="Unauthorized">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Unauthorized: Authentication required",
+    errorCode: "ERR_401",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[401]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="WARN" 
+                    message='#["[" ++ correlationId ++ "] Unauthorized access attempt"]' 
+                    doc:name="Log Unauthorized"/>
+        </on-error-propagate>
+
+        <!-- Forbidden - 403 -->
+        <on-error-propagate type="HTTP:FORBIDDEN" 
+                            doc:name="Forbidden">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Forbidden: Access denied",
+    errorCode: "ERR_403",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[403]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="WARN" 
+                    message='#["[" ++ correlationId ++ "] Forbidden access"]' 
+                    doc:name="Log Forbidden"/>
+        </on-error-propagate>
+
+        <!-- Not Found - 404 -->
+        <on-error-propagate type="APIKIT:NOT_FOUND" 
+                            doc:name="Not Found">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Resource not found",
+    errorCode: "ERR_404",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="WARN" 
+                    message='#["[" ++ correlationId ++ "] Resource not found"]' 
+                    doc:name="Log Not Found"/>
+        </on-error-propagate>
+
+        <!-- Method Not Allowed - 405 -->
+        <on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED" 
+                            doc:name="Method Not Allowed">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Method not allowed",
+    errorCode: "ERR_405",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[405]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="WARN" 
+                    message='#["[" ++ correlationId ++ "] Method not allowed"]' 
+                    doc:name="Log Method Not Allowed"/>
+        </on-error-propagate>
+
+        <!-- Conflict / Duplicate - 409 -->
+        <on-error-propagate type="MULE:DUPLICATE_MESSAGE" 
+                            doc:name="Duplicate Message">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Duplicate message detected - already processed",
+    errorCode: "ERR_409",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[409]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="WARN" 
+                    message='#["[" ++ correlationId ++ "] Duplicate message detected"]' 
+                    doc:name="Log Duplicate"/>
+        </on-error-propagate>
+
+        <!-- Unsupported Media Type - 415 -->
+        <on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE" 
+                            doc:name="Unsupported Media Type">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Unsupported media type",
+    errorCode: "ERR_415",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[415]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="WARN" 
+                    message='#["[" ++ correlationId ++ "] Unsupported media type"]' 
+                    doc:name="Log Unsupported Media Type"/>
+        </on-error-propagate>
+
+        <!-- Bad Gateway - 502 (Kafka Connectivity) -->
+        <on-error-propagate type="KAFKA:CONNECTIVITY, KAFKA:TIMEOUT" 
+                            doc:name="Kafka Connectivity Error">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Service temporarily unavailable - Kafka connectivity issue",
+    errorCode: "ERR_502",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    retryable: true
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[502]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="ERROR" 
+                    message='#["[" ++ correlationId ++ "] Kafka connectivity error: " ++ (error.description default "Unknown")]' 
+                    doc:name="Log Kafka Error"/>
+        </on-error-propagate>
+
+        <!-- Gateway Timeout - 504 -->
+        <on-error-propagate type="HTTP:TIMEOUT" 
+                            doc:name="Gateway Timeout">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Gateway timeout - upstream service did not respond in time",
+    errorCode: "ERR_504",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    retryable: true
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[504]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="ERROR" 
+                    message='#["[" ++ correlationId ++ "] Gateway timeout"]' 
+                    doc:name="Log Timeout"/>
+        </on-error-propagate>
+
+        <!-- Kafka Retry Exhausted -->
+        <on-error-propagate type="KAFKA:RETRY_EXHAUSTED" 
+                            doc:name="Kafka Retry Exhausted">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Kafka publishing failed after retries",
+    errorCode: "ERR_503",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"},
+    retryable: true
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[503]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="ERROR" 
+                    message='#["[" ++ correlationId ++ "] Kafka retry exhausted: " ++ (error.description default "Unknown")]' 
+                    doc:name="Log Kafka Retry Exhausted"/>
+        </on-error-propagate>
+
+        <!-- Internal Server Error - 500 (Catch All) -->
+        <on-error-propagate type="ANY" 
+                            doc:name="Internal Server Error">
+            <ee:transform doc:name="Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    success: false,
+    message: "Internal server error",
+    errorCode: "ERR_500",
+    correlationId: correlationId,
+    timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[500]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+            <logger level="ERROR" 
+                    message='#["[" ++ correlationId ++ "] Internal server error: " ++ (error.errorType.identifier default "UNKNOWN") ++ " - " ++ (error.description default "Unknown error")]' 
+                    doc:name="Log Internal Error"/>
+        </on-error-propagate>
+
+    </error-handler>
+
+</mule>
